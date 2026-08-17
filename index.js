@@ -560,10 +560,10 @@ const cpuProcBox = grid.set(6, 6.5, 4, 2.5, blessed.box, {
 const vpnBox = grid.set(0, 9, 10, 3, blessed.box, {
   label: ' VPN & Routes ', tags: true, mouse: true, keys: true, vi: true,
   scrollable: true, alwaysScroll: false, scrollback: 200,
-  // Keep the scrollbar as a thin marker instead of a solid colored block.
-  scrollbar: { ch: '│', style: { fg: 'cyan', bg: 'black' } },
+  // Keep the scrollbar as a thin neutral marker instead of a blue block.
+  scrollbar: { ch: '│', style: { fg: 'white', bg: 'black' } },
   border: { type: 'line' },
-  style: { border: { fg: 'cyan' }, fg: 'white' }, content: 'initializing…',
+  style: { border: { fg: 'white' }, fg: 'white' }, content: 'initializing…',
 });
 // Bottom: Sessions and packet-derived flows stay visible together in a
 // horizontal split of the narrow network column; Commands remains wide.
