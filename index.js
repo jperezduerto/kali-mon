@@ -529,8 +529,14 @@ function requireInteractiveTerminal() {
 }
 requireInteractiveTerminal();
 const screen = blessed.screen({ smartCSR: true, fullUnicode: true, title: 'htb-monitor' });
-// 24 rows (not 12) so the bottom status bar can be a thin single line.
-const grid = new contrib.grid({ rows: 24, cols: 12, screen });
+// Give the proportional grid every terminal line except the fixed status bar.
+// A dedicated parent avoids percentage-based blank space on tall terminals and
+// prevents the bottom widgets from being hidden beneath the status line.
+const dashboard = blessed.box({
+  parent: screen, top: 0, left: 0, width: '100%', height: '100%-1',
+});
+const grid = new contrib.grid({ rows: 24, cols: 12, screen: dashboard });
+const neutralScrollbar = () => ({ ch: '│', style: { fg: 'white', bg: 'black' } });
 
 // Top-left column (cols 0-3) split in two: Status banner over the CPU box.
 const artBox = grid.set(0, 0, 5, 4, blessed.box, {
@@ -538,55 +544,56 @@ const artBox = grid.set(0, 0, 5, 4, blessed.box, {
   style: { border: { fg: 'green' } }, content: '',
 });
 const cpuBox = grid.set(5, 0, 5, 4, blessed.box, {
-  label: ' CPU (per core) ', tags: true, scrollable: true, border: { type: 'line' },
+  label: ' CPU (per core) ', tags: true, mouse: true, keys: true, vi: true,
+  scrollable: true, alwaysScroll: false, scrollback: 200,
+  scrollbar: neutralScrollbar(), border: { type: 'line' },
   style: { border: { fg: 'green' } }, content: 'sampling…',
 });
-// Top-middle (cols 4-8, where CPU used to be): the command-category stats
+// Top-middle (cols 4-7): command-category stats over two equal process tiles.
 // stacked over two side-by-side process tiles — top RSS (Top Mem) and top
-// %CPU (Top CPU). The middle band splits into equal halves (fractional col
-// spans resolve to percentages, so 2.5 units each is fine).
-const statsBox = grid.set(0, 4, 6, 5, blessed.box, {
+// %CPU (Top CPU). The top row uses three balanced four-column sections.
+const statsBox = grid.set(0, 4, 6, 4, blessed.box, {
   label: ' Command Stats ', tags: true, border: { type: 'line' },
   style: { border: { fg: 'yellow' } }, content: '',
 });
-const memProcBox = grid.set(6, 4, 4, 2.5, blessed.box, {
+const memProcBox = grid.set(6, 4, 4, 2, blessed.box, {
   label: ' Top Mem ', tags: true, border: { type: 'line' },
   style: { border: { fg: 'yellow' } }, content: '',
 });
-const cpuProcBox = grid.set(6, 6.5, 4, 2.5, blessed.box, {
+const cpuProcBox = grid.set(6, 6, 4, 2, blessed.box, {
   label: ' Top CPU ', tags: true, border: { type: 'line' },
   style: { border: { fg: 'yellow' } }, content: '',
 });
-const vpnBox = grid.set(0, 9, 10, 3, blessed.box, {
+const vpnBox = grid.set(0, 8, 10, 4, blessed.box, {
   label: ' VPN & Routes ', tags: true, mouse: true, keys: true, vi: true,
-  scrollable: true, alwaysScroll: true, scrollback: 200,
-  scrollbar: { ch: ' ', style: { bg: 'cyan' } },
+  scrollable: true, alwaysScroll: false, scrollback: 200,
+  scrollbar: neutralScrollbar(),
   border: { type: 'line' },
-  style: { border: { fg: 'cyan' }, fg: 'white' }, content: 'initializing…',
+  style: { border: { fg: 'white' }, fg: 'white' }, content: 'initializing…',
 });
 // Bottom: Sessions and packet-derived flows stay visible together in a
 // horizontal split of the narrow network column; Commands remains wide.
 // Sessions is a hand-rendered tree (not a table): listen ports grouped over
 // the peers connected to them, plus an outbound group. A scrollable blessed.box
 // gives full control over per-node color + folding text on every live refresh.
-const sessBox = grid.set(10, 0, 7, 4, blessed.box, {
+const sessBox = grid.set(10, 0, 7, 5, blessed.box, {
   label: ' Sessions ', tags: true, mouse: true, keys: true, vi: true,
-  scrollable: true, alwaysScroll: true, scrollback: 1000,
-  scrollbar: { ch: ' ', style: { bg: 'cyan' } },
-  border: { type: 'line' }, style: { border: { fg: 'cyan' }, fg: 'white' },
+  scrollable: true, alwaysScroll: false, scrollback: 1000,
+  scrollbar: neutralScrollbar(),
+  border: { type: 'line' }, style: { border: { fg: 'white' }, fg: 'white' },
 });
-const flowBox = grid.set(17, 0, 7, 4, blessed.box, {
+const flowBox = grid.set(17, 0, 7, 5, blessed.box, {
   label: ' Packet Flows ', tags: true, mouse: true, keys: true, vi: true,
-  scrollable: true, alwaysScroll: true, scrollback: 1000,
-  scrollbar: { ch: ' ', style: { bg: 'yellow' } },
+  scrollable: true, alwaysScroll: false, scrollback: 1000,
+  scrollbar: neutralScrollbar(),
   border: { type: 'line' }, style: { border: { fg: 'yellow' }, fg: 'white' },
 });
 // blessed.log (not contrib.log): it auto-follows new output but pauses when
 // you scroll up, and resumes when you scroll back to the bottom — built in.
-const cmdLog = grid.set(10, 4, 14, 8, blessed.log, {
+const cmdLog = grid.set(10, 5, 14, 7, blessed.log, {
   label: ' Commands [all]  ↑↓/wheel scroll · End=live · a=hexstrike ', tags: true,
-  mouse: true, keys: true, vi: true, scrollable: true, alwaysScroll: true,
-  scrollback: 2000, scrollbar: { ch: ' ', style: { bg: 'red' } },
+  mouse: true, keys: true, vi: true, scrollable: true, alwaysScroll: false,
+  scrollback: 2000, scrollbar: neutralScrollbar(),
   border: { type: 'line' }, style: { border: { fg: 'red' }, fg: 'white' },
 });
 uiErrorLog = cmdLog;
@@ -596,6 +603,41 @@ const statusBar = blessed.box({
   parent: screen, bottom: 0, left: 0, width: '100%', height: 1,
   tags: true, style: { fg: 'white', bg: 'blue' },
 });
+
+// contrib.grid expresses positions as percentages, whose independent rounding
+// can leave a blank row or column at some terminal sizes. Resolve the intended
+// proportions to shared integer boundaries so adjacent panels always meet and
+// the dashboard consumes every cell above the status bar.
+function layoutDashboard() {
+  const width = Math.max(1, Number(dashboard.width) || screen.width || 1);
+  const height = Math.max(1, Number(dashboard.height) || Math.max(1, screen.height - 1));
+  const topBottom = Math.max(1, Math.min(height - 1, Math.round(height * 10 / 24)));
+  const topHalf = Math.max(1, Math.min(topBottom - 1, Math.round(topBottom / 2)));
+  const statsBottom = Math.max(1, Math.min(topBottom - 1, Math.round(topBottom * 6 / 10)));
+  const firstThird = Math.round(width / 3);
+  const secondThird = Math.round(width * 2 / 3);
+  const bottomSplit = Math.round(width * 5 / 12);
+  const bottomHalf = topBottom + Math.round((height - topBottom) / 2);
+
+  const place = (widget, top, left, bottom, right) => {
+    widget.top = top;
+    widget.left = left;
+    widget.height = Math.max(1, bottom - top);
+    widget.width = Math.max(1, right - left);
+  };
+
+  place(artBox, 0, 0, topHalf, firstThird);
+  place(cpuBox, topHalf, 0, topBottom, firstThird);
+  place(statsBox, 0, firstThird, statsBottom, secondThird);
+  const processSplit = firstThird + Math.round((secondThird - firstThird) / 2);
+  place(memProcBox, statsBottom, firstThird, topBottom, processSplit);
+  place(cpuProcBox, statsBottom, processSplit, topBottom, secondThird);
+  place(vpnBox, 0, secondThird, topBottom, width);
+  place(sessBox, topBottom, 0, bottomHalf, bottomSplit);
+  place(flowBox, bottomHalf, 0, height, bottomSplit);
+  place(cmdLog, topBottom, bottomSplit, height, width);
+}
+layoutDashboard();
 
 let prevCores = cpuCores();
 // Per-core ring of recent utilization samples → 5-minute high-water mark.
@@ -1405,6 +1447,7 @@ sessTimer.run();
 // Reflow on terminal resize: the contrib grid is proportional, so just
 // re-feed data (re-renders every canvas at the new size) and repaint.
 screen.on('resize', () => {
+  layoutDashboard();
   timer.run();
   artTimer.run();
   sessTimer.run();
@@ -1414,8 +1457,8 @@ screen.on('resize', () => {
 // mouse wheel works on hover regardless. End jumps back to live tail.
 cmdLog.focus();
 cmdLog.key(['end'], () => { cmdLog.setScrollPerc(100); cmdLog._userScrolled = false; screen.render(); });
-// Tab cycles keyboard focus through all four scrollable live panes.
-const focusables = [cmdLog, vpnBox, sessBox, flowBox];
+// Tab cycles keyboard focus through every scrollable live pane.
+const focusables = [cmdLog, vpnBox, cpuBox, sessBox, flowBox];
 screen.key(['tab'], () => {
   const idx = focusables.indexOf(screen.focused);
   focusables[(idx + 1) % focusables.length].focus();
