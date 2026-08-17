@@ -177,7 +177,9 @@ web) so overlapping tools land in the most specific bucket.
   - `mine` — inside this dashboard's own process tree (its `ss`/`bpftrace`/`ip`
     polls). **Always hidden** from the pane so it never shows its own noise. The
     monitor tracks its PID and observed descendants explicitly, with `/proc`
-    start-time validation to handle fast child exits and PID reuse safely.
+    start-time validation to handle fast child exits and PID reuse safely. It
+    also recognizes concurrent kali-mon instances and filters their process
+    trees, preventing one dashboard from displaying another dashboard's polls.
   - `other` — local desktop shells, daemons, cron. Tagged gray.
 
   Caveat: classification reads `/proc` just after the exec, so a very

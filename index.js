@@ -382,6 +382,11 @@ function procStartTime(pid) {
   return stat.slice(close + 2).trim().split(/\s+/)[19] || null;
 }
 
+function isKaliMonRoot(pid) {
+  const args = readProc(`/proc/${pid}/cmdline`).split('\0').filter(Boolean);
+  return args.some((arg) => /(?:^|\/)(?:kali-mon|htb-monitor)\/index\.js$/.test(arg));
+}
+
 function rememberMonitorPid(pid, now = Date.now()) {
   if (!Number.isInteger(pid) || pid <= 0) return;
   monitorPids.delete(pid); // refresh insertion order for bounded eviction
@@ -418,7 +423,9 @@ function isMonitorPid(pid, now = Date.now()) {
 }
 
 function classifyExecOrigin(execPid, parentPid, comm) {
-  if (execPid === MY_PID || isMonitorPid(execPid) || parentPid === MY_PID || isMonitorPid(parentPid)) {
+  if (execPid === MY_PID || isMonitorPid(execPid) || parentPid === MY_PID
+      || isMonitorPid(parentPid) || isKaliMonRoot(parentPid)) {
+    if (isKaliMonRoot(parentPid)) rememberMonitorPid(parentPid);
     rememberMonitorPid(execPid);
     return 'mine';
   }
@@ -434,7 +441,11 @@ function classifyOrigin(startPid) {
   if (cached && Date.now() - cached.t < ANC_TTL) return cached.cat;
   let pid = startPid, depth = 0, ssh = false, hex = false, panel = false, mine = false;
   while (pid > 1 && depth++ < 40) {
-    if (pid === MY_PID) { mine = true; break; }
+    if (pid === MY_PID || isKaliMonRoot(pid)) {
+      rememberMonitorPid(pid);
+      mine = true;
+      break;
+    }
     const stat = readProc(`/proc/${pid}/stat`);
     if (!stat) break;
     const close = stat.lastIndexOf(')');
