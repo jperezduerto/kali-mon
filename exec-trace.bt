@@ -1,0 +1,5 @@
+tracepoint:syscalls:sys_enter_execve
+{
+    printf("E\t%d\t%d\t%d\t%s\t", uid, pid, curtask->real_parent->pid, comm);
+    join(args->argv);
+}

@@ -1,0 +1,41 @@
+{
+  "name": "htb-monitor",
+  "version": "1.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jperezduerto/kali-mon.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jperezduerto/kali-mon/issues"
+  },
+  "homepage": "https://github.com/jperezduerto/kali-mon",
+  "description": "Single-console live TUI for a Kali box: VPN tunnel, per-core CPU, RAM, VPN bandwidth, live sockets, and system-wide command execution (eBPF/bpftrace) with a hexstrike watchdog.",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "htb-monitor": "./index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --check index.js && node --check art.js",
+    "start": "node index.js"
+  },
+  "keywords": [
+    "htb",
+    "monitor",
+    "tui",
+    "blessed",
+    "bpftrace",
+    "ebpf",
+    "pentest",
+    "vpn"
+  ],
+  "author": "jperezduerto",
+  "license": "ISC",
+  "dependencies": {
+    "blessed": "^0.1.81",
+    "blessed-contrib": "^4.11.0"
+  }
+}

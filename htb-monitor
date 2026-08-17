@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# launcher for the htb-monitor console
+exec node "$(dirname "$(readlink -f "$0")")/index.js" "$@"
