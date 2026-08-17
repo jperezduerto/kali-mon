@@ -108,10 +108,22 @@ function guardedAsyncInterval(source, fn, ms) {
 }
 
 const readProc = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+function monitoredExecFile(cmd, args, opts, callback) {
+  const child = execFile(cmd, args, opts, callback);
+  rememberMonitorPid(child.pid);
+  return child;
+}
+
+function monitoredSpawn(cmd, args, opts) {
+  const child = spawn(cmd, args, opts);
+  rememberMonitorPid(child.pid);
+  return child;
+}
+
 const sh = (cmd, args, opts = {}) => new Promise((res) =>
-  execFile(cmd, args, { timeout: 4000, maxBuffer: 1 << 20, ...opts }, (e, out) => res(e ? '' : out)));
+  monitoredExecFile(cmd, args, { timeout: 4000, maxBuffer: 1 << 20, ...opts }, (e, out) => res(e ? '' : out)));
 const shChecked = (cmd, args, opts = {}) => new Promise((resolve, reject) =>
-  execFile(cmd, args, { timeout: 4000, maxBuffer: 1 << 20, ...opts }, (error, stdout = '', stderr = '') => {
+  monitoredExecFile(cmd, args, { timeout: 4000, maxBuffer: 1 << 20, ...opts }, (error, stdout = '', stderr = '') => {
     if (error) reject(new Error((stderr || error.message || `${cmd} failed`).trim()));
     else resolve(stdout);
   }));
@@ -353,6 +365,70 @@ const MY_PID = process.pid;
 const ANC_TTL = 8000;   // ms — cached classification considered fresh
 const ANC_MAX = 4096;   // hard cap on live entries between sweeps
 const ancCache = new Map();
+
+// Explicitly track this monitor's exec tree. /proc ancestry is normally enough,
+// but very short-lived helpers can exit before the bpftrace event reaches Node.
+// Remembering observed parent/child links closes that race. Linux start times
+// prevent a recycled PID from being mistaken for an old monitor descendant.
+const MONITOR_PID_GRACE_MS = 60_000;
+const MONITOR_PID_MAX = 4096;
+const monitorPids = new Map(); // pid -> { start: /proc starttime|null, seen: ms }
+
+function procStartTime(pid) {
+  const stat = readProc(`/proc/${pid}/stat`);
+  const close = stat.lastIndexOf(')');
+  if (close < 0) return null;
+  // Fields after "comm" begin at field 3 (state); starttime is field 22.
+  return stat.slice(close + 2).trim().split(/\s+/)[19] || null;
+}
+
+function rememberMonitorPid(pid, now = Date.now()) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  monitorPids.delete(pid); // refresh insertion order for bounded eviction
+  monitorPids.set(pid, { start: procStartTime(pid), seen: now });
+  while (monitorPids.size > MONITOR_PID_MAX) {
+    const oldest = monitorPids.keys().next().value;
+    if (oldest === MY_PID) {
+      const self = monitorPids.get(oldest);
+      monitorPids.delete(oldest);
+      monitorPids.set(oldest, self);
+      continue;
+    }
+    monitorPids.delete(oldest);
+  }
+}
+
+function isMonitorPid(pid, now = Date.now()) {
+  if (pid === MY_PID) return true;
+  const known = monitorPids.get(pid);
+  if (!known) return false;
+  const currentStart = procStartTime(pid);
+  if (known.start && currentStart && known.start !== currentStart) {
+    monitorPids.delete(pid);
+    return false;
+  }
+  if (currentStart) {
+    known.start ||= currentStart;
+    known.seen = now;
+    return true;
+  }
+  if (now - known.seen <= MONITOR_PID_GRACE_MS) return true;
+  monitorPids.delete(pid);
+  return false;
+}
+
+function classifyExecOrigin(execPid, parentPid, comm) {
+  if (execPid === MY_PID || isMonitorPid(execPid) || parentPid === MY_PID || isMonitorPid(parentPid)) {
+    rememberMonitorPid(execPid);
+    return 'mine';
+  }
+  const origin = comm === 'xfce4-panel' ? 'xfce-panel' : classifyOrigin(parentPid);
+  if (origin === 'mine') rememberMonitorPid(execPid);
+  return origin;
+}
+
+rememberMonitorPid(MY_PID);
+
 function classifyOrigin(startPid) {
   const cached = ancCache.get(startPid);
   if (cached && Date.now() - cached.t < ANC_TTL) return cached.cat;
@@ -386,6 +462,17 @@ function sweepAncCache() {
   if (ancCache.size > ANC_MAX) {
     let excess = ancCache.size - ANC_MAX;
     for (const k of ancCache.keys()) { if (excess-- <= 0) break; ancCache.delete(k); }
+  }
+}
+
+function sweepMonitorPids() {
+  const now = Date.now();
+  for (const [pid, known] of monitorPids) {
+    if (pid === MY_PID) continue;
+    const currentStart = procStartTime(pid);
+    if (currentStart && known.start && currentStart !== known.start) monitorPids.delete(pid);
+    else if (currentStart) { known.start ||= currentStart; known.seen = now; }
+    else if (now - known.seen > MONITOR_PID_GRACE_MS) monitorPids.delete(pid);
   }
 }
 
@@ -902,7 +989,7 @@ async function tick() {
   // --- Status bar (host · clock · keys) ---
   const clock = new Date().toLocaleTimeString();
   statusBar.setContent(
-    `{bold} ${USER}@${HOST}{/}  {bold}${clock}{/}` +
+    `{bold} ${USER}@${HOST}{/} {gray-fg}pid:${MY_PID}{/}  {bold}${clock}{/}` +
     `   {white-fg}q{/} quit · {white-fg}f{/} traffic · {white-fg}a{/} cmds` +
     `   traffic:{bold}${filterTunnel ? 'tunnel' : 'all'}{/} · cmds:{bold}${hexOnly ? 'hexstrike' : 'all'}{/}` +
     (wdKillCount ? `   {red-fg}⚠ watchdog kills: ${wdKillCount}{/}` : '') + ' ');
@@ -1249,7 +1336,7 @@ function startFlowCapture(interfaceNames = captureInterfaceNames()) {
     '-e', 'frame.len',
   ];
   flowCaptureSignature = interfaceNames.join('\t');
-  const child = spawn('sudo', args);
+  const child = monitoredSpawn('sudo', args);
   let buf = '';
   child.stdout.on('data', (data) => {
     try {
@@ -1298,7 +1385,7 @@ function ensureFlowCaptureInterfaces() {
   if (!flowTrace || signature === flowCaptureSignature || flowCaptureReconfigure) return;
   flowCaptureReconfigure = true;
   flowCaptureStatus = 'reconfiguring';
-  execFile('sudo', ['-n', 'kill', '-TERM', String(flowTrace.pid)], { timeout: 3000 }, (err) => {
+  monitoredExecFile('sudo', ['-n', 'kill', '-TERM', String(flowTrace.pid)], { timeout: 3000 }, (err) => {
     if (err) {
       flowCaptureReconfigure = false;
       logRuntimeError('tshark interface reconfigure', err);
@@ -1342,7 +1429,7 @@ function sweepRecentExec() {
 }
 
 function startExecTrace() {
-  const bt = spawn('sudo', ['-n', 'bpftrace', path.join(__dirname, 'exec-trace.bt')]);
+  const bt = monitoredSpawn('sudo', ['-n', 'bpftrace', path.join(__dirname, 'exec-trace.bt')]);
   let buf = '';
   bt.stdout.on('data', (d) => {
     try {
@@ -1353,7 +1440,7 @@ function startExecTrace() {
         if (!ln.startsWith('E\t')) continue;
         const [, uid, pid, ppid, comm, ...rest] = ln.split('\t');
         const argv = rest.join(' ');
-        const origin = comm === 'xfce4-panel' ? 'xfce-panel' : classifyOrigin(+ppid);
+        const origin = classifyExecOrigin(+pid, +ppid, comm);
         // Always log everything to disk. The live-view filters are applied
         // only after the audit entry has been queued.
         const now = new Date();
@@ -1436,7 +1523,9 @@ let trace = startExecTrace();            // reassigned by the auto-restart path
 let flowTrace = startFlowCapture();       // packet metadata from every up iface
 const timer = guardedAsyncInterval('tick', tick, 1000);
 const artTimer = guardedInterval('renderArt', renderArt, 220);
-const ancSweepTimer = guardedInterval('cacheSweep', () => { sweepAncCache(); sweepRecentExec(); }, 30_000);
+const ancSweepTimer = guardedInterval('cacheSweep', () => {
+  sweepAncCache(); sweepMonitorPids(); sweepRecentExec();
+}, 30_000);
 const hexTimer = guardedAsyncInterval('hexHealthTick', hexHealthTick, HEX_MS);        // hexstrike /health
 const sessTimer = guardedAsyncInterval('refreshSessions', refreshSessions, SESS_MS);  // slow sessions poll
 timer.run();
@@ -1499,7 +1588,7 @@ function quit({ restart = false } = {}) {
     if (err?.code !== 'EPERM') logRuntimeError('trace shutdown', err);
   }
   try {
-    if (flowTrace.pid) execFile('sudo', ['-n', 'kill', '-TERM', String(flowTrace.pid)], { timeout: 3000 }, () => {});
+    if (flowTrace.pid) monitoredExecFile('sudo', ['-n', 'kill', '-TERM', String(flowTrace.pid)], { timeout: 3000 }, () => {});
   } catch (err) {
     logRuntimeError('tshark shutdown', err);
   }
@@ -1516,7 +1605,7 @@ function quit({ restart = false } = {}) {
   }
   const done = () => {
     if (restart) {
-      const child = spawn(process.execPath, process.argv.slice(1), {
+      const child = monitoredSpawn(process.execPath, process.argv.slice(1), {
         cwd: process.cwd(), env: process.env, stdio: 'inherit',
       });
       child.unref();
@@ -1526,8 +1615,8 @@ function quit({ restart = false } = {}) {
   try {
     let cleanupPending = 2;
     const cleaned = () => { if (--cleanupPending === 0) done(); };
-    execFile('sudo', ['-n', 'pkill', '-f', TRACE_MATCH], { timeout: 3000 }, cleaned);
-    execFile('sudo', ['-n', 'pkill', '-f', FLOW_MATCH], { timeout: 3000 }, cleaned);
+    monitoredExecFile('sudo', ['-n', 'pkill', '-f', TRACE_MATCH], { timeout: 3000 }, cleaned);
+    monitoredExecFile('sudo', ['-n', 'pkill', '-f', FLOW_MATCH], { timeout: 3000 }, cleaned);
     setTimeout(done, 3500).unref();   // safety net if the callback never fires
   } catch { done(); }
 }
