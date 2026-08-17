@@ -544,16 +544,16 @@ const cpuBox = grid.set(5, 0, 5, 4, blessed.box, {
 // Top-middle (cols 4-8, where CPU used to be): the command-category stats
 // stacked over two side-by-side process tiles — top RSS (Top Mem) and top
 // %CPU (Top CPU). The middle band splits into equal halves (fractional col
-// spans resolve to percentages, so 2.5 units each is fine).
+// spans use integer columns so the grid has no fractional rounding gaps.
 const statsBox = grid.set(0, 4, 6, 5, blessed.box, {
   label: ' Command Stats ', tags: true, border: { type: 'line' },
   style: { border: { fg: 'yellow' } }, content: '',
 });
-const memProcBox = grid.set(6, 4, 4, 2.5, blessed.box, {
+const memProcBox = grid.set(6, 4, 4, 2, blessed.box, {
   label: ' Top Mem ', tags: true, border: { type: 'line' },
   style: { border: { fg: 'yellow' } }, content: '',
 });
-const cpuProcBox = grid.set(6, 6.5, 4, 2.5, blessed.box, {
+const cpuProcBox = grid.set(6, 6, 4, 3, blessed.box, {
   label: ' Top CPU ', tags: true, border: { type: 'line' },
   style: { border: { fg: 'yellow' } }, content: '',
 });
@@ -572,9 +572,9 @@ const vpnBox = grid.set(0, 9, 10, 3, blessed.box, {
 // gives full control over per-node color + folding text on every live refresh.
 const sessBox = grid.set(10, 0, 7, 4, blessed.box, {
   label: ' Sessions ', tags: true, mouse: true, keys: true, vi: true,
-  scrollable: true, alwaysScroll: true, scrollback: 1000,
-  scrollbar: { ch: ' ', style: { bg: 'cyan' } },
-  border: { type: 'line' }, style: { border: { fg: 'cyan' }, fg: 'white' },
+  scrollable: true, alwaysScroll: false, scrollback: 1000,
+  scrollbar: { ch: '│', style: { fg: 'white', bg: 'black' } },
+  border: { type: 'line' }, style: { border: { fg: 'white' }, fg: 'white' },
 });
 const flowBox = grid.set(17, 0, 7, 4, blessed.box, {
   label: ' Packet Flows ', tags: true, mouse: true, keys: true, vi: true,
