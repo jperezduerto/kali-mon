@@ -70,7 +70,7 @@ reflows on resize) with a dynamic ASCII status banner plus focused live panels:
 | Live command execution (hexstrike + SSH shells, **scrollable**) | eBPF via `sudo bpftrace exec-trace.bt` |
 | Command activity — per-category icons + rolling 1h counts | classified from the exec stream |
 | Top processes by memory (RSS) and by CPU (%CPU) | `ps -eo rss=,pcpu=,comm=` |
-| Bottom status bar (user@host · clock · keys · active filters) | `os` + live state |
+| Bottom status bar (user@host · monitor PID · clock · keys · active filters) | `os` + live state |
 
 Layout: top-left column splits into the status banner over the per-core CPU
 box; command-category stats fill the top-middle, with side-by-side **Top Mem**
@@ -175,7 +175,9 @@ web) so overlapping tools land in the most specific bucket.
   - `xfce-panel` — descends from `xfce4-panel`. Always hidden from the pane and
     activity counters to suppress recurring desktop plugin/launcher noise.
   - `mine` — inside this dashboard's own process tree (its `ss`/`bpftrace`/`ip`
-    polls). **Always hidden** from the pane so it never shows its own noise.
+    polls). **Always hidden** from the pane so it never shows its own noise. The
+    monitor tracks its PID and observed descendants explicitly, with `/proc`
+    start-time validation to handle fast child exits and PID reuse safely.
   - `other` — local desktop shells, daemons, cron. Tagged gray.
 
   Caveat: classification reads `/proc` just after the exec, so a very
